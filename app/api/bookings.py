@@ -66,7 +66,7 @@ def _booking_to_response(booking: Booking) -> BookingResponse:
         guest_id=booking.guest_id,
         guest=guest_brief,
         booking_time=booking.booking_time.isoformat() if booking.booking_time else "",
-        guests_count=booking.guests_count,
+        guests_count=booking.party_size,
         status=booking.status,
         created_at=(booking.created_at.isoformat() if booking.created_at else ""),
     )
@@ -174,7 +174,7 @@ async def create_booking(
     booking = Booking(
         guest_id=body.guestId,
         booking_time=booking_time,
-        guests_count=body.persons,
+        party_size=body.persons,
         status="pending",
         created_at=datetime.now(timezone.utc),
     )

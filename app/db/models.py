@@ -44,7 +44,8 @@ class Booking(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     guest_id: Mapped[int] = mapped_column(ForeignKey("guests.id"), nullable=False)
     booking_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    guests_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Railway БД использует party_size, не guests_count
+    party_size: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[str] = mapped_column(String(50), default="pending")
     admin_notes: Mapped[Optional[str]] = mapped_column(Text)
     reminded_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))

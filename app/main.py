@@ -18,7 +18,7 @@ async def _ensure_admin_seed() -> None:
     """Если в БД нет пользователей — создать одного admin из env (B11)."""
     async with async_session_factory() as session:
         result = await session.execute(select(func.count(User.id)))
-        count = (await result.scalar()) or 0
+        count = result.scalar() or 0
         if count > 0:
             return
         admin = User(

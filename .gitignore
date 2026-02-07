@@ -1,0 +1,32 @@
+# Виртуальное окружение
+.venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.Python
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Локальные настройки (секреты не в репо)
+.env
+.env.local
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+scripts/remove-venv-from-history.sh
+# Все .md кроме README.md
+*.md
+!README.md
+
+# Alembic (оставляем версии, игнорируем только локальные артефакты при необходимости)
+# alembic/versions/*.py — не игнорируем, миграции в репо

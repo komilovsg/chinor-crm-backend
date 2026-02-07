@@ -1,4 +1,4 @@
-"""Guests API: GET list (search, page, limit), GET :id, POST, PATCH :id, GET export (CSV)."""
+"""Guests API: GET list (search, page, limit), GET :id, POST, PATCH :id, POST :id/visits, GET export (CSV)."""
 import csv
 import io
 from datetime import datetime, timezone
@@ -11,8 +11,9 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, require_role
-from app.db.models import Guest, User
+from app.db.models import Guest, Setting, User, Visit
 from app.db.session import get_session
+from app.services.segmentation import calc_segment
 
 router = APIRouter(prefix="/api", tags=["guests"])
 
@@ -48,7 +49,7 @@ class UpdateGuestRequest(BaseModel):
     name: Optional[str] = None
     phone: Optional[str] = None
     email: Optional[str] = None
-    segment: Optional[str] = None  # Новичок, Постоянный, VIP
+    # segment не редактируется вручную — рассчитывается автоматически по visits_count
 
 
 def _guest_to_response(guest: Guest) -> GuestResponse:
@@ -146,10 +147,10 @@ async def get_guests(
 @router.get("/guests/export")
 async def export_guests(
     search: Optional[str] = None,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_role(["admin"])),
     session: AsyncSession = Depends(get_session),
 ) -> Response:
-    """Экспорт гостей в CSV (поиск по имени/телефону)."""
+    """Экспорт гостей в CSV (поиск по имени/телефону). Доступ: только admin."""
     stmt = select(Guest).where(Guest.deleted_at.is_(None)).order_by(Guest.id)
     if search and search.strip():
         search_arg = f"%{search.strip()}%"
@@ -259,9 +260,67 @@ async def update_guest(
         guest.name = body.name.strip() if body.name else None
     if body.email is not None:
         guest.email = body.email.strip() if body.email else None
-    if body.segment is not None:
-        seg = body.segment.strip() if body.segment else "Новичок"
-        guest.segment = seg if seg in ("Новичок", "Новички", "Постоянный", "VIP") else "Новичок"
+    # segment пересчитывается автоматически при изменении visits_count
+    await session.commit()
+    await session.refresh(guest)
+    return _guest_to_response(guest)
+
+
+async def _get_segment_thresholds(session: AsyncSession) -> tuple[int, int]:
+    """Получить пороги сегментации из settings."""
+    result = await session.execute(
+        select(Setting).where(
+            Setting.key.in_(("segment_regular_threshold", "segment_vip_threshold"))
+        )
+    )
+    rows = result.scalars().all()
+    by_key = {r.key: r.value for r in rows}
+    reg = 5
+    vip = 10
+    if by_key.get("segment_regular_threshold"):
+        try:
+            reg = max(0, int(by_key["segment_regular_threshold"].strip()))
+        except (ValueError, AttributeError):
+            pass
+    if by_key.get("segment_vip_threshold"):
+        try:
+            vip = max(0, int(by_key["segment_vip_threshold"].strip()))
+        except (ValueError, AttributeError):
+            pass
+    if vip <= reg:
+        vip = reg + 1
+    return reg, vip
+
+
+@router.post("/guests/{guest_id}/visits", response_model=GuestResponse)
+async def add_guest_visit(
+    guest_id: int,
+    current_user: User = Depends(require_role(["admin", "hostess_1", "hostess_2"])),
+    session: AsyncSession = Depends(get_session),
+) -> GuestResponse:
+    """Добавить визит гостю: создать запись Visit, увеличить visits_count, пересчитать сегмент. Доступ: admin, hostess_1, hostess_2."""
+    result = await session.execute(select(Guest).where(Guest.id == guest_id))
+    guest = result.scalars().one_or_none()
+    if not guest or guest.deleted_at is not None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Guest not found")
+
+    now = datetime.now(timezone.utc)
+    visit = Visit(
+        guest_id=guest.id,
+        arrived_at=now,
+        left_at=None,
+        revenue=None,
+        admin_notes=None,
+        created_at=now,
+    )
+    session.add(visit)
+    guest.visits_count = (guest.visits_count or 0) + 1
+    guest.last_visit_at = now
+    guest.updated_at = now
+
+    reg, vip = await _get_segment_thresholds(session)
+    guest.segment = calc_segment(guest.visits_count, reg, vip)
+
     await session.commit()
     await session.refresh(guest)
     return _guest_to_response(guest)

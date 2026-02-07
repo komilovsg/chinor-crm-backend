@@ -70,7 +70,7 @@ async def root():
     return {"service": "CHINOR CRM API", "docs": "/docs"}
 
 
-from app.api import auth, dashboard, bookings, guests, broadcasts, settings
+from app.api import auth, dashboard, bookings, guests, broadcasts, settings, users
 
 app.include_router(auth.router)
 app.include_router(dashboard.router)
@@ -78,6 +78,7 @@ app.include_router(bookings.router)
 app.include_router(guests.router)
 app.include_router(broadcasts.router)
 app.include_router(settings.router)
+app.include_router(users.router)
 
 
 def _run_uvicorn() -> None:

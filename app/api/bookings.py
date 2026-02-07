@@ -46,8 +46,17 @@ class PaginatedBookingsResponse(BaseModel):
     limit: int
 
 
+class CreateGuestInline(BaseModel):
+    """Данные для создания гостя при брони (если гость не найден)."""
+    phone: str
+    name: Optional[str] = None
+    email: Optional[str] = None
+
+
 class CreateBookingRequest(BaseModel):
-    guestId: int
+    """guestId — существующий гость; guest — создать/найти по телефону (приоритет у guestId)."""
+    guestId: Optional[int] = None
+    guest: Optional[CreateGuestInline] = None
     date: str  # YYYY-MM-DD
     time: str  # HH:MM or HH:MM:SS
     persons: int
@@ -149,11 +158,33 @@ async def create_booking(
     current_user: User = Depends(require_role(["admin", "hostess_1", "hostess_2"])),
     session: AsyncSession = Depends(get_session),
 ) -> BookingResponse:
-    """Создать бронь: guestId, date (YYYY-MM-DD), time (HH:MM), persons. Доступ: admin, hostess_1, hostess_2."""
-    guest_result = await session.execute(select(Guest).where(Guest.id == body.guestId))
-    guest = guest_result.scalars().one_or_none()
+    """Создать бронь: guestId (существующий) или guest (найти/создать по телефону), date, time, persons."""
+    guest: Optional[Guest] = None
+    if body.guestId:
+        guest_result = await session.execute(select(Guest).where(Guest.id == body.guestId))
+        guest = guest_result.scalars().one_or_none()
+        if not guest:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Guest not found")
+    elif body.guest and body.guest.phone.strip():
+        phone = body.guest.phone.strip()
+        existing = await session.execute(select(Guest).where(Guest.phone == phone))
+        guest = existing.scalars().one_or_none()
+        if not guest:
+            guest = Guest(
+                phone=phone,
+                name=(body.guest.name or "").strip() or None,
+                email=(body.guest.email or "").strip() or None,
+                segment="Новичок",
+                visits_count=0,
+                created_at=datetime.now(timezone.utc),
+            )
+            session.add(guest)
+            await session.flush()
     if not guest:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Guest not found")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Provide guestId or guest.phone",
+        )
 
     try:
         date_part = datetime.strptime(body.date.strip()[:10], "%Y-%m-%d").date()
@@ -172,7 +203,7 @@ async def create_booking(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="persons must be >= 1")
 
     booking = Booking(
-        guest_id=body.guestId,
+        guest_id=guest.id,
         booking_time=booking_time,
         party_size=body.persons,
         status="pending",

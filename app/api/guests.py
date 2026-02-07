@@ -88,11 +88,11 @@ async def get_guests(
 
     count_stmt = select(func.count()).select_from(stmt.subquery())
     total_result = await session.execute(count_stmt)
-    total = (await total_result.scalar()) or 0
+    total = (total_result.scalar() or 0)
 
     stmt = stmt.offset(offset).limit(limit)
     result = await session.execute(stmt)
-    guests = await result.scalars().all()
+    guests = result.scalars().all()
 
     return PaginatedGuestsResponse(
         items=[_guest_to_response(g) for g in guests],
@@ -119,7 +119,7 @@ async def export_guests(
             )
         )
     result = await session.execute(stmt)
-    guests = await result.scalars().all()
+    guests = result.scalars().all()
 
     output = io.StringIO()
     writer = csv.writer(output)
@@ -149,7 +149,7 @@ async def get_guest(
 ) -> GuestResponse:
     """Один гость по ID."""
     result = await session.execute(select(Guest).where(Guest.id == guest_id))
-    guest = await result.scalar_one_or_none()
+    guest = result.scalars().one_or_none()
     if not guest or guest.deleted_at is not None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Guest not found")
     return _guest_to_response(guest)
@@ -163,7 +163,7 @@ async def create_guest(
 ) -> GuestResponse:
     """Создать гостя. Телефон уникален. Доступ: admin, hostess_1, hostess_2."""
     existing = await session.execute(select(Guest).where(Guest.phone == body.phone.strip()))
-    if await existing.scalar_one_or_none():
+    if existing.scalars().one_or_none():
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Guest with this phone already exists",
@@ -191,13 +191,13 @@ async def update_guest(
 ) -> GuestResponse:
     """Обновить данные гостя. Телефон должен оставаться уникальным. Доступ: admin, hostess_1, hostess_2."""
     result = await session.execute(select(Guest).where(Guest.id == guest_id))
-    guest = await result.scalar_one_or_none()
+    guest = result.scalars().one_or_none()
     if not guest or guest.deleted_at is not None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Guest not found")
     if body.phone is not None:
         phone = body.phone.strip()
         other = await session.execute(select(Guest).where(Guest.phone == phone, Guest.id != guest_id))
-        if await other.scalar_one_or_none():
+        if other.scalars().one_or_none():
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Another guest with this phone already exists",

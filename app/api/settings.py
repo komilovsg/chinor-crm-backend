@@ -40,7 +40,7 @@ async def get_settings(
 ) -> SettingsResponse:
     """Вернуть настройки из таблицы settings (key-value). Отсутствующие ключи — дефолты."""
     result = await session.execute(select(Setting).where(Setting.key.in_(SETTING_KEYS)))
-    rows = await result.scalars().all()
+    rows = result.scalars().all()
     by_key = {r.key: r.value for r in rows}
     return SettingsResponse(
         pushNotifications=_parse_bool(by_key.get("pushNotifications")),
@@ -57,7 +57,7 @@ async def update_settings(
 ) -> SettingsResponse:
     """Обновить переданные настройки и вернуть полный объект."""
     result = await session.execute(select(Setting).where(Setting.key.in_(SETTING_KEYS)))
-    rows = await result.scalars().all()
+    rows = result.scalars().all()
     by_key = {r.key: r for r in rows}
 
     if body.pushNotifications is not None:
@@ -70,7 +70,7 @@ async def update_settings(
     await session.commit()
 
     result2 = await session.execute(select(Setting).where(Setting.key.in_(SETTING_KEYS)))
-    rows2 = await result2.scalars().all()
+    rows2 = result2.scalars().all()
     by_key2 = {r.key: r.value for r in rows2}
     return SettingsResponse(
         pushNotifications=_parse_bool(by_key2.get("pushNotifications")),

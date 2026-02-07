@@ -110,11 +110,11 @@ async def get_bookings(
 
     count_stmt = select(func.count()).select_from(stmt.subquery())
     total_result = await session.execute(count_stmt)
-    total = (await total_result.scalar()) or 0
+    total = (total_result.scalar() or 0)
 
     stmt = stmt.offset(offset).limit(limit)
     result = await session.execute(stmt)
-    bookings = await result.scalars().all()
+    bookings = result.scalars().all()
 
     return PaginatedBookingsResponse(
         items=[_booking_to_response(b) for b in bookings],
@@ -137,7 +137,7 @@ async def get_booking(
         .where(Booking.id == booking_id)
     )
     result = await session.execute(stmt)
-    booking = await result.scalar_one_or_none()
+    booking = result.scalars().one_or_none()
     if not booking:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
     return _booking_to_response(booking)
@@ -151,7 +151,7 @@ async def create_booking(
 ) -> BookingResponse:
     """Создать бронь: guestId, date (YYYY-MM-DD), time (HH:MM), persons. Доступ: admin, hostess_1, hostess_2."""
     guest_result = await session.execute(select(Guest).where(Guest.id == body.guestId))
-    guest = await guest_result.scalar_one_or_none()
+    guest = guest_result.scalars().one_or_none()
     if not guest:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Guest not found")
 
@@ -199,7 +199,7 @@ async def update_booking_status(
         )
     stmt = select(Booking).options(selectinload(Booking.guest)).where(Booking.id == booking_id)
     result = await session.execute(stmt)
-    booking = await result.scalar_one_or_none()
+    booking = result.scalars().one_or_none()
     if not booking:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
     booking.status = body.status

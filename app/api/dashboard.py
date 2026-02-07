@@ -28,7 +28,7 @@ async def get_dashboard_stats(
     """Статистика для карточек дашборда: брони, приезды сегодня, гости, % no-show."""
     # totalBookings
     total_result = await session.execute(select(func.count(Booking.id)))
-    total_bookings = (await total_result.scalar()) or 0
+    total_bookings = (total_result.scalar() or 0)
 
     # todayArrivals: брони с booking_time в сегодняшней дате (UTC)
     today_start = datetime.combine(date.today(), datetime.min.time()).replace(tzinfo=timezone.utc)
@@ -39,24 +39,24 @@ async def get_dashboard_stats(
             Booking.booking_time <= today_end,
         )
     )
-    today_arrivals = (await today_result.scalar()) or 0
+    today_arrivals = (today_result.scalar() or 0)
 
     # guestCount: гости без deleted_at
     guests_result = await session.execute(
         select(func.count(Guest.id)).where(Guest.deleted_at.is_(None))
     )
-    guest_count = (await guests_result.scalar()) or 0
+    guest_count = (guests_result.scalar() or 0)
 
     # noShowRate: доля no_show среди завершённых (confirmed, no_show, canceled)
     resolved_statuses = ("confirmed", "no_show", "canceled")
     resolved_result = await session.execute(
         select(func.count(Booking.id)).where(Booking.status.in_(resolved_statuses))
     )
-    resolved_total = (await resolved_result.scalar()) or 0
+    resolved_total = (resolved_result.scalar() or 0)
     no_show_result = await session.execute(
         select(func.count(Booking.id)).where(Booking.status == "no_show")
     )
-    no_show_count = (await no_show_result.scalar()) or 0
+    no_show_count = (no_show_result.scalar() or 0)
     no_show_rate = round((no_show_count / resolved_total * 100.0), 1) if resolved_total else 0.0
 
     return DashboardStatsResponse(

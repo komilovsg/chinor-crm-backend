@@ -68,7 +68,7 @@ async def get_broadcast_stats(
         Guest.phone != "",
     )
     result = await session.execute(stmt)
-    available = (await result.scalar()) or 0
+    available = (result.scalar() or 0)
     return BroadcastStatsResponse(available=available, delivered=None, errors=None)
 
 
@@ -81,7 +81,7 @@ async def get_broadcast_history(
     campaigns_result = await session.execute(
         select(Campaign).order_by(Campaign.id.desc())
     )
-    campaigns = await campaigns_result.scalars().all()
+    campaigns = campaigns_result.scalars().all()
     out = []
     for c in campaigns:
         sent_result = await session.execute(
@@ -96,8 +96,8 @@ async def get_broadcast_history(
                 CampaignSend.status == "failed",
             )
         )
-        sent_count = (await sent_result.scalar()) or 0
-        failed_count = (await failed_result.scalar()) or 0
+        sent_count = (sent_result.scalar() or 0)
+        failed_count = (failed_result.scalar() or 0)
         out.append(
             BroadcastHistoryItemResponse(
                 campaign=_campaign_to_response(c),
@@ -135,7 +135,7 @@ async def create_broadcast(
     if body.segment and body.segment.strip():
         guests_stmt = guests_stmt.where(Guest.segment == body.segment.strip())
     guests_result = await session.execute(guests_stmt)
-    guests = await guests_result.scalars().all()
+    guests = guests_result.scalars().all()
 
     for guest in guests:
         send = CampaignSend(

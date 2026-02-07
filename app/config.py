@@ -1,5 +1,4 @@
 """Конфигурация приложения через переменные окружения (pydantic-settings)."""
-from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -24,7 +23,7 @@ class Settings(BaseSettings):
 
     # Хост и порт для uvicorn (Railway передаёт PORT в env; локально — 8000)
     host: str = "0.0.0.0"
-    port: int = Field(default=8000, validation_alias="PORT")
+    port: int = 8000  # pydantic-settings читает PORT из env автоматически
 
     # Сид первого админа (B11): если в БД нет пользователей, создаётся один с этими данными
     admin_email: str = "admin@localhost"

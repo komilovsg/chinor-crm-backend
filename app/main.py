@@ -92,4 +92,9 @@ def _run_uvicorn() -> None:
 
 
 if __name__ == "__main__":
-    _run_uvicorn()
+    try:
+        _run_uvicorn()
+    except Exception as e:
+        import sys
+        print(f"[app.main] Startup failed: {e}", file=sys.stderr)
+        raise

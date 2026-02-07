@@ -7,9 +7,10 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
+RUN chmod +x start.sh
 
 # PORT задаётся на Railway; по умолчанию 8000 для локального docker run
 ENV PORT=8000
 EXPOSE $PORT
 
-CMD ["python", "-m", "app.main"]
+CMD ["./start.sh"]

@@ -92,7 +92,8 @@ class Campaign(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     message_text: Mapped[str] = mapped_column(Text, nullable=False)
     target_segment: Mapped[Optional[str]] = mapped_column(String(50))
-    scheduled_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    # Railway БД использует scheduled_for, не scheduled_at
+    scheduled_for: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 

@@ -63,6 +63,46 @@ def _guest_to_response(guest: Guest) -> GuestResponse:
     )
 
 
+class GuestStatsResponse(BaseModel):
+    total: int
+    vip: int
+    regular: int
+    new: int
+
+
+@router.get("/guests/stats", response_model=GuestStatsResponse)
+async def get_guest_stats(
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> GuestStatsResponse:
+    """Статистика гостей: всего, VIP, постоянные, новички (без удалённых)."""
+    base = select(Guest).where(Guest.deleted_at.is_(None))
+    total_result = await session.execute(select(func.count()).select_from(base.subquery()))
+    total = (total_result.scalar() or 0)
+    vip_result = await session.execute(
+        select(func.count(Guest.id)).where(
+            Guest.deleted_at.is_(None),
+            Guest.segment == "VIP",
+        )
+    )
+    regular_result = await session.execute(
+        select(func.count(Guest.id)).where(
+            Guest.deleted_at.is_(None),
+            Guest.segment == "Постоянный",
+        )
+    )
+    new_result = await session.execute(
+        select(func.count(Guest.id)).where(
+            Guest.deleted_at.is_(None),
+            Guest.segment.in_(["Новичок", "Новички"]),
+        )
+    )
+    vip_count = vip_result.scalar() or 0
+    regular_count = regular_result.scalar() or 0
+    new_count = new_result.scalar() or 0
+    return GuestStatsResponse(total=total, vip=vip_count, regular=regular_count, new=new_count)
+
+
 @router.get("/guests", response_model=PaginatedGuestsResponse)
 async def get_guests(
     search: Optional[str] = None,

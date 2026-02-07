@@ -25,7 +25,7 @@ class CampaignResponse(BaseModel):
     name: str
     message_text: str
     target_segment: Optional[str]
-    scheduled_at: Optional[str]
+    scheduled_at: Optional[str] = None  # алиас для scheduled_for
     created_at: str
     updated_at: str
 
@@ -50,7 +50,7 @@ def _campaign_to_response(c: Campaign) -> CampaignResponse:
         name=c.name,
         message_text=c.message_text,
         target_segment=c.target_segment,
-        scheduled_at=c.scheduled_at.isoformat() if c.scheduled_at else None,
+        scheduled_at=c.scheduled_for.isoformat() if c.scheduled_for else None,
         created_at=c.created_at.isoformat() if c.created_at else "",
         updated_at=c.updated_at.isoformat() if c.updated_at else "",
     )
@@ -120,7 +120,7 @@ async def create_broadcast(
         name=f"Рассылка: {body.segment}",
         message_text=body.messageText,
         target_segment=body.segment or None,
-        scheduled_at=None,
+        scheduled_for=None,
         created_at=now,
         updated_at=now,
     )

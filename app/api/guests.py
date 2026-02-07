@@ -48,6 +48,7 @@ class UpdateGuestRequest(BaseModel):
     name: Optional[str] = None
     phone: Optional[str] = None
     email: Optional[str] = None
+    segment: Optional[str] = None  # Новичок, Постоянный, VIP
 
 
 def _guest_to_response(guest: Guest) -> GuestResponse:
@@ -201,17 +202,23 @@ async def create_guest(
     current_user: User = Depends(require_role(["admin", "hostess_1", "hostess_2"])),
     session: AsyncSession = Depends(get_session),
 ) -> GuestResponse:
-    """Создать гостя. Телефон уникален. Доступ: admin, hostess_1, hostess_2."""
-    existing = await session.execute(select(Guest).where(Guest.phone == body.phone.strip()))
+    """Создать гостя. Телефон обязателен и уникален. Доступ: admin, hostess_1, hostess_2."""
+    phone = body.phone.strip() if body.phone else ""
+    if not phone:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Phone is required",
+        )
+    existing = await session.execute(select(Guest).where(Guest.phone == phone))
     if existing.scalars().one_or_none():
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Guest with this phone already exists",
         )
     guest = Guest(
-        phone=body.phone.strip(),
-        name=(body.name.strip() or None) if body.name is not None else None,
-        email=(body.email.strip() or None) if body.email is not None else None,
+        phone=phone,
+        name=(body.name.strip() or None) if body.name else None,
+        email=(body.email.strip() or None) if body.email else None,
         segment="Новичок",
         visits_count=0,
         created_at=datetime.now(timezone.utc),
@@ -229,13 +236,18 @@ async def update_guest(
     current_user: User = Depends(require_role(["admin", "hostess_1", "hostess_2"])),
     session: AsyncSession = Depends(get_session),
 ) -> GuestResponse:
-    """Обновить данные гостя. Телефон должен оставаться уникальным. Доступ: admin, hostess_1, hostess_2."""
+    """Обновить данные гостя (имя, телефон, email, сегмент). Телефон уникален. Доступ: admin, hostess_1, hostess_2."""
     result = await session.execute(select(Guest).where(Guest.id == guest_id))
     guest = result.scalars().one_or_none()
     if not guest or guest.deleted_at is not None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Guest not found")
     if body.phone is not None:
-        phone = body.phone.strip()
+        phone = body.phone.strip() if body.phone else ""
+        if not phone:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Phone cannot be empty",
+            )
         other = await session.execute(select(Guest).where(Guest.phone == phone, Guest.id != guest_id))
         if other.scalars().one_or_none():
             raise HTTPException(
@@ -247,6 +259,9 @@ async def update_guest(
         guest.name = body.name.strip() if body.name else None
     if body.email is not None:
         guest.email = body.email.strip() if body.email else None
+    if body.segment is not None:
+        seg = body.segment.strip() if body.segment else "Новичок"
+        guest.segment = seg if seg in ("Новичок", "Новички", "Постоянный", "VIP") else "Новичок"
     await session.commit()
     await session.refresh(guest)
     return _guest_to_response(guest)

@@ -9,9 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import get_current_user, require_role
-from app.db.models import Booking, Guest, Setting, User, Visit
+from app.db.models import Booking, Guest, User, Visit
 from app.db.session import get_session
-from app.services.segmentation import calc_segment
 
 router = APIRouter(prefix="/api", tags=["bookings"])
 
@@ -216,31 +215,6 @@ async def create_booking(
     return _booking_to_response(booking)
 
 
-async def _get_segment_thresholds(session: AsyncSession) -> tuple[int, int]:
-    """Пороги сегментации из settings."""
-    result = await session.execute(
-        select(Setting).where(
-            Setting.key.in_(("segment_regular_threshold", "segment_vip_threshold"))
-        )
-    )
-    rows = result.scalars().all()
-    by_key = {r.key: r.value for r in rows}
-    reg, vip = 5, 10
-    if by_key.get("segment_regular_threshold"):
-        try:
-            reg = max(0, int(by_key["segment_regular_threshold"].strip()))
-        except (ValueError, AttributeError):
-            pass
-    if by_key.get("segment_vip_threshold"):
-        try:
-            vip = max(0, int(by_key["segment_vip_threshold"].strip()))
-        except (ValueError, AttributeError):
-            pass
-    if vip <= reg:
-        vip = reg + 1
-    return reg, vip
-
-
 @router.patch("/bookings/{booking_id}/status", response_model=BookingResponse)
 async def update_booking_status(
     booking_id: int,
@@ -264,7 +238,7 @@ async def update_booking_status(
     new_status = (body.status or "").strip().lower()
     booking.status = new_status
 
-    # При переводе в confirmed — +1 визит гостю
+    # При переводе в confirmed — создаём Visit; триггер БД обновит visits_count и segment
     if new_status == "confirmed" and old_status != "confirmed":
         guest = booking.guest
         if not guest:
@@ -282,12 +256,7 @@ async def update_booking_status(
                     created_at=now,
                 )
             )
-            guest.visits_count = (guest.visits_count or 0) + 1
-            guest.last_visit_at = now
-            guest.updated_at = now
-            reg, vip = await _get_segment_thresholds(session)
-            guest.segment = calc_segment(guest.visits_count, reg, vip)
-            session.add(guest)
+            # Не инкрементируем вручную — триггер trg_update_guest_metrics_on_visit делает это
 
     await session.commit()
     await session.refresh(booking, ["guest"])

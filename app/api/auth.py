@@ -37,12 +37,21 @@ class LoginResponse(BaseModel):
 
 def _create_access_token(user_id: int) -> str:
     expire = datetime.now(timezone.utc) + timedelta(days=7)
-    payload = {"sub": str(user_id), "exp": expire}
+    # PyJWT требует exp как число (Unix timestamp), не datetime
+    payload = {"sub": str(user_id), "exp": int(expire.timestamp())}
     return jwt.encode(
         payload,
         _settings.jwt_secret,
         algorithm=_settings.jwt_algorithm,
     )
+
+
+def _verify_password(plain: str, hashed: str) -> bool:
+    """Проверка пароля; при ошибке passlib (битый хеш) — считаем неверным."""
+    try:
+        return bool(hashed and pwd_context.verify(plain, hashed))
+    except Exception:
+        return False
 
 
 @router.post("/auth/login", response_model=LoginResponse)
@@ -55,7 +64,7 @@ async def login(
         select(User).where(User.email == body.email)
     )
     user = await result.scalar_one_or_none()
-    if not user or not pwd_context.verify(body.password, user.password_hash):
+    if not user or not _verify_password(body.password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
@@ -66,7 +75,7 @@ async def login(
         user=UserResponse(
             id=user.id,
             email=user.email,
-            role=user.role,
-            display_name=user.display_name,
+            role=user.role or "admin",
+            display_name=user.display_name or user.email or "User",
         ),
     )

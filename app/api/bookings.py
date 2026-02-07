@@ -9,8 +9,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import get_current_user, require_role
-from app.db.models import Booking, Guest, User
+from app.db.models import Booking, Guest, Setting, User, Visit
 from app.db.session import get_session
+from app.services.segmentation import calc_segment
 
 router = APIRouter(prefix="/api", tags=["bookings"])
 
@@ -215,6 +216,31 @@ async def create_booking(
     return _booking_to_response(booking)
 
 
+async def _get_segment_thresholds(session: AsyncSession) -> tuple[int, int]:
+    """Пороги сегментации из settings."""
+    result = await session.execute(
+        select(Setting).where(
+            Setting.key.in_(("segment_regular_threshold", "segment_vip_threshold"))
+        )
+    )
+    rows = result.scalars().all()
+    by_key = {r.key: r.value for r in rows}
+    reg, vip = 5, 10
+    if by_key.get("segment_regular_threshold"):
+        try:
+            reg = max(0, int(by_key["segment_regular_threshold"].strip()))
+        except (ValueError, AttributeError):
+            pass
+    if by_key.get("segment_vip_threshold"):
+        try:
+            vip = max(0, int(by_key["segment_vip_threshold"].strip()))
+        except (ValueError, AttributeError):
+            pass
+    if vip <= reg:
+        vip = reg + 1
+    return reg, vip
+
+
 @router.patch("/bookings/{booking_id}/status", response_model=BookingResponse)
 async def update_booking_status(
     booking_id: int,
@@ -222,7 +248,7 @@ async def update_booking_status(
     current_user: User = Depends(require_role(["admin", "hostess_1", "hostess_2"])),
     session: AsyncSession = Depends(get_session),
 ) -> BookingResponse:
-    """Обновить статус брони: pending, confirmed, canceled, no_show. Доступ: admin, hostess_1, hostess_2."""
+    """Обновить статус брони: pending, confirmed, canceled, no_show. При подтверждении — +1 визит гостю."""
     if body.status not in ALLOWED_STATUSES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -233,7 +259,36 @@ async def update_booking_status(
     booking = result.scalars().one_or_none()
     if not booking:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
-    booking.status = body.status
+
+    old_status = (booking.status or "").strip().lower()
+    new_status = (body.status or "").strip().lower()
+    booking.status = new_status
+
+    # При переводе в confirmed — +1 визит гостю
+    if new_status == "confirmed" and old_status != "confirmed":
+        guest = booking.guest
+        if not guest:
+            guest_result = await session.execute(
+                select(Guest).where(Guest.id == booking.guest_id)
+            )
+            guest = guest_result.scalars().one_or_none()
+        if guest and guest.deleted_at is None:
+            now = datetime.now(timezone.utc)
+            session.add(
+                Visit(
+                    guest_id=guest.id,
+                    booking_id=booking.id,
+                    arrived_at=now,
+                    created_at=now,
+                )
+            )
+            guest.visits_count = (guest.visits_count or 0) + 1
+            guest.last_visit_at = now
+            guest.updated_at = now
+            reg, vip = await _get_segment_thresholds(session)
+            guest.segment = calc_segment(guest.visits_count, reg, vip)
+            session.add(guest)
+
     await session.commit()
     await session.refresh(booking, ["guest"])
     return _booking_to_response(booking)

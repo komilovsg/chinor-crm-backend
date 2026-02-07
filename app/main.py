@@ -21,9 +21,12 @@ async def _ensure_admin_seed() -> None:
         count = result.scalar() or 0
         if count > 0:
             return
+        # bcrypt accepts max 72 bytes; truncate to avoid ValueError
+        raw = _settings.admin_password.encode("utf-8")[:72]
+        pwd_for_hash = raw.decode("utf-8", errors="ignore") or _settings.admin_password[:1]
         admin = User(
             email=_settings.admin_email,
-            password_hash=_pwd_context.hash(_settings.admin_password),
+            password_hash=_pwd_context.hash(pwd_for_hash),
             role="admin",
             display_name="Admin",
         )

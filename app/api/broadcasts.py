@@ -167,10 +167,20 @@ async def create_broadcast(
 
     webhook_url = await _get_broadcast_webhook_url(session)
     if webhook_url:
+        guests_payload = [
+            {
+                "id": g.id,
+                "phone": g.phone or "",
+                "name": (g.name or "").strip() or "",
+                "last_visit_at": g.last_visit_at.strftime("%d.%m.%Y") if g.last_visit_at else "",
+            }
+            for g in guests
+        ]
         payload = {
             "campaign_id": campaign.id,
             "segment": body.segment,
             "messageText": body.messageText,
+            "guests": guests_payload,
         }
         if image_url:
             payload["imageUrl"] = image_url

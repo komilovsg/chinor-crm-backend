@@ -1,4 +1,4 @@
-"""Broadcasts API: GET stats, GET history, POST (create campaign + campaign_sends, no real send)."""
+"""Broadcasts API: GET stats, GET history, POST (create campaign + campaign_sends, trigger webhook)."""
 from datetime import datetime, timezone
 from typing import List, Optional
 
@@ -8,8 +8,9 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
-from app.db.models import Campaign, CampaignSend, Guest, User
+from app.db.models import Campaign, CampaignSend, Guest, Setting, User
 from app.db.session import get_session
+from app.services.webhooks import schedule_webhook
 
 router = APIRouter(prefix="/api", tags=["broadcasts"])
 
@@ -24,6 +25,7 @@ class CampaignResponse(BaseModel):
     id: int
     name: str
     message_text: str
+    image_url: Optional[str] = None
     target_segment: Optional[str]
     scheduled_at: Optional[str] = None  # алиас для scheduled_for
     created_at: str
@@ -42,6 +44,7 @@ class BroadcastHistoryItemResponse(BaseModel):
 class CreateBroadcastRequest(BaseModel):
     segment: str
     messageText: str
+    imageUrl: Optional[str] = None
 
 
 def _campaign_to_response(c: Campaign) -> CampaignResponse:
@@ -49,6 +52,7 @@ def _campaign_to_response(c: Campaign) -> CampaignResponse:
         id=c.id,
         name=c.name,
         message_text=c.message_text,
+        image_url=getattr(c, "image_url", None),
         target_segment=c.target_segment,
         scheduled_at=c.scheduled_for.isoformat() if c.scheduled_for else None,
         created_at=c.created_at.isoformat() if c.created_at else "",
@@ -108,17 +112,30 @@ async def get_broadcast_history(
     return out
 
 
+async def _get_broadcast_webhook_url(session: AsyncSession) -> str:
+    """Получить URL webhook для рассылок: broadcastWebhookUrl или webhookUrl."""
+    result = await session.execute(
+        select(Setting).where(
+            Setting.key.in_(("broadcastWebhookUrl", "webhookUrl"))
+        )
+    )
+    by_key = {r.key: (r.value or "").strip() for r in result.scalars().all()}
+    return by_key.get("broadcastWebhookUrl") or by_key.get("webhookUrl") or ""
+
+
 @router.post("/broadcasts", response_model=CampaignResponse)
 async def create_broadcast(
     body: CreateBroadcastRequest,
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> CampaignResponse:
-    """Создать кампанию и записи campaign_sends со статусом pending. Отправку в WhatsApp не делать."""
+    """Создать кампанию и записи campaign_sends. После commit — POST webhook в n8n (если URL задан)."""
     now = datetime.now(timezone.utc)
+    image_url = (body.imageUrl or "").strip() or None
     campaign = Campaign(
         name=f"Рассылка: {body.segment}",
         message_text=body.messageText,
+        image_url=image_url,
         target_segment=body.segment or None,
         scheduled_for=None,
         created_at=now,
@@ -147,4 +164,16 @@ async def create_broadcast(
         session.add(send)
     await session.commit()
     await session.refresh(campaign)
+
+    webhook_url = await _get_broadcast_webhook_url(session)
+    if webhook_url:
+        payload = {
+            "campaign_id": campaign.id,
+            "segment": body.segment,
+            "messageText": body.messageText,
+        }
+        if image_url:
+            payload["imageUrl"] = image_url
+        schedule_webhook(webhook_url, payload)
+
     return _campaign_to_response(campaign)

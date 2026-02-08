@@ -9,8 +9,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import get_current_user, require_role
-from app.db.models import Booking, Guest, User, Visit
+from app.db.models import Booking, Guest, Setting, User, Visit
 from app.db.session import get_session
+from app.services.webhooks import schedule_webhook
 
 router = APIRouter(prefix="/api", tags=["bookings"])
 
@@ -212,6 +213,31 @@ async def create_booking(
     session.add(booking)
     await session.commit()
     await session.refresh(booking, ["guest"])
+
+    result = await session.execute(
+        select(Setting).where(
+            Setting.key.in_(("bookingWebhookUrl", "webhookUrl", "restaurant_place", "default_table_message"))
+        )
+    )
+    by_key = {r.key: (r.value or "").strip() for r in result.scalars().all()}
+    webhook_url = by_key.get("bookingWebhookUrl") or by_key.get("webhookUrl") or ""
+    place = by_key.get("restaurant_place") or "CHINOR"
+    table_msg = by_key.get("default_table_message") or "будет назначен"
+
+    if webhook_url:
+        payload = {
+            "event": "booking_created",
+            "booking_id": booking.id,
+            "guest_phone": guest.phone or "",
+            "guest_name": (guest.name or "").strip() or "",
+            "date": date_part.strftime("%d.%m.%Y"),
+            "time": t.strftime("%H:%M"),
+            "party_size": booking.party_size,
+            "place": place,
+            "table": table_msg,
+        }
+        schedule_webhook(webhook_url, payload)
+
     return _booking_to_response(booking)
 
 

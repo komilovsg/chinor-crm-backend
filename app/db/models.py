@@ -93,6 +93,7 @@ class Campaign(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     # Railway БД использует message_body; маппим message_text -> message_body
     message_text: Mapped[str] = mapped_column("message_body", Text, nullable=False)
+    image_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     target_segment: Mapped[Optional[str]] = mapped_column(String(50))
     # Railway БД использует scheduled_for, не scheduled_at
     scheduled_for: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))

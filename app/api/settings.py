@@ -19,10 +19,18 @@ SETTING_KEYS = (
     "autoBackup",
     "segment_regular_threshold",
     "segment_vip_threshold",
+    "broadcastWebhookUrl",
+    "bookingWebhookUrl",
+    "restaurant_place",
+    "default_table_message",
 )
 
 DEFAULT_REGULAR = 5
 DEFAULT_VIP = 10
+
+
+DEFAULT_RESTAURANT_PLACE = "CHINOR"
+DEFAULT_TABLE_MESSAGE = "будет назначен"
 
 
 class SettingsResponse(BaseModel):
@@ -31,6 +39,10 @@ class SettingsResponse(BaseModel):
     autoBackup: bool
     segment_regular_threshold: int
     segment_vip_threshold: int
+    broadcastWebhookUrl: str
+    bookingWebhookUrl: str
+    restaurant_place: str
+    default_table_message: str
 
 
 class UpdateSettingsRequest(BaseModel):
@@ -39,6 +51,10 @@ class UpdateSettingsRequest(BaseModel):
     autoBackup: Optional[bool] = None
     segment_regular_threshold: Optional[int] = None
     segment_vip_threshold: Optional[int] = None
+    broadcastWebhookUrl: Optional[str] = None
+    bookingWebhookUrl: Optional[str] = None
+    restaurant_place: Optional[str] = None
+    default_table_message: Optional[str] = None
 
 
 def _parse_bool(value: Optional[str]) -> bool:
@@ -76,6 +92,10 @@ async def get_settings(
         autoBackup=_parse_bool(by_key.get("autoBackup")),
         segment_regular_threshold=reg,
         segment_vip_threshold=vip,
+        broadcastWebhookUrl=by_key.get("broadcastWebhookUrl") or "",
+        bookingWebhookUrl=by_key.get("bookingWebhookUrl") or "",
+        restaurant_place=(by_key.get("restaurant_place") or "").strip() or DEFAULT_RESTAURANT_PLACE,
+        default_table_message=(by_key.get("default_table_message") or "").strip() or DEFAULT_TABLE_MESSAGE,
     )
 
 
@@ -102,6 +122,14 @@ async def update_settings(
     if body.segment_vip_threshold is not None:
         v = max(0, body.segment_vip_threshold)
         _upsert_setting(session, by_key, "segment_vip_threshold", str(v))
+    if body.broadcastWebhookUrl is not None:
+        _upsert_setting(session, by_key, "broadcastWebhookUrl", body.broadcastWebhookUrl)
+    if body.bookingWebhookUrl is not None:
+        _upsert_setting(session, by_key, "bookingWebhookUrl", body.bookingWebhookUrl)
+    if body.restaurant_place is not None:
+        _upsert_setting(session, by_key, "restaurant_place", body.restaurant_place.strip())
+    if body.default_table_message is not None:
+        _upsert_setting(session, by_key, "default_table_message", body.default_table_message.strip())
 
     await session.commit()
 
@@ -118,6 +146,10 @@ async def update_settings(
         autoBackup=_parse_bool(by_key2.get("autoBackup")),
         segment_regular_threshold=reg,
         segment_vip_threshold=vip,
+        broadcastWebhookUrl=by_key2.get("broadcastWebhookUrl") or "",
+        bookingWebhookUrl=by_key2.get("bookingWebhookUrl") or "",
+        restaurant_place=(by_key2.get("restaurant_place") or "").strip() or DEFAULT_RESTAURANT_PLACE,
+        default_table_message=(by_key2.get("default_table_message") or "").strip() or DEFAULT_TABLE_MESSAGE,
     )
 
 

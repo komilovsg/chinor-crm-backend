@@ -205,10 +205,10 @@ async def get_guest(
 @router.post("/guests", response_model=GuestResponse)
 async def create_guest(
     body: CreateGuestRequest,
-    current_user: User = Depends(require_role(["admin", "hostess_1", "hostess_2"])),
+    current_user: User = Depends(require_role(["admin", "hostess"])),
     session: AsyncSession = Depends(get_session),
 ) -> GuestResponse:
-    """Создать гостя. Телефон обязателен и уникален. Доступ: admin, hostess_1, hostess_2."""
+    """Создать гостя. Телефон обязателен и уникален. Доступ: admin, hostess."""
     phone = body.phone.strip() if body.phone else ""
     if not phone:
         raise HTTPException(
@@ -250,10 +250,10 @@ async def create_guest(
 async def update_guest(
     guest_id: int,
     body: UpdateGuestRequest,
-    current_user: User = Depends(require_role(["admin", "hostess_1", "hostess_2"])),
+    current_user: User = Depends(require_role(["admin", "hostess"])),
     session: AsyncSession = Depends(get_session),
 ) -> GuestResponse:
-    """Обновить данные гостя (имя, телефон, email, сегмент). Телефон уникален. Доступ: admin, hostess_1, hostess_2."""
+    """Обновить данные гостя (имя, телефон, email, сегмент). Телефон уникален. Доступ: admin, hostess."""
     result = await session.execute(select(Guest).where(Guest.id == guest_id))
     guest = result.scalars().one_or_none()
     if not guest or guest.deleted_at is not None:
@@ -313,10 +313,10 @@ async def _get_segment_thresholds(session: AsyncSession) -> tuple[int, int]:
 @router.post("/guests/{guest_id}/visits", response_model=GuestResponse)
 async def add_guest_visit(
     guest_id: int,
-    current_user: User = Depends(require_role(["admin", "hostess_1", "hostess_2"])),
+    current_user: User = Depends(require_role(["admin", "hostess"])),
     session: AsyncSession = Depends(get_session),
 ) -> GuestResponse:
-    """Добавить визит гостю: увеличить visits_count и пересчитать сегмент по правилам из Настроек (confirmed_bookings_count не меняется). Доступ: admin, hostess_1, hostess_2."""
+    """Добавить визит гостю: увеличить visits_count и пересчитать сегмент по правилам из Настроек (confirmed_bookings_count не меняется). Доступ: admin, hostess."""
     result = await session.execute(select(Guest).where(Guest.id == guest_id))
     guest = result.scalars().one_or_none()
     if not guest or guest.deleted_at is not None:

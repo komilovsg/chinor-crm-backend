@@ -149,7 +149,7 @@ class User(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
-    role: Mapped[str] = mapped_column(String(50), nullable=False)  # admin, hostess_1, hostess_2
+    role: Mapped[str] = mapped_column(String(50), nullable=False)  # admin, hostess
     display_name: Mapped[str] = mapped_column(String(255), nullable=False)
     created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 

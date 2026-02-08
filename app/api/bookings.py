@@ -158,7 +158,7 @@ async def get_booking(
 @router.post("/bookings", response_model=BookingResponse)
 async def create_booking(
     body: CreateBookingRequest,
-    current_user: User = Depends(require_role(["admin", "hostess_1", "hostess_2"])),
+    current_user: User = Depends(require_role(["admin", "hostess"])),
     session: AsyncSession = Depends(get_session),
 ) -> BookingResponse:
     """Создать бронь: guestId (существующий) или guest (найти/создать по телефону), date, time, persons."""
@@ -271,7 +271,7 @@ async def create_booking(
 async def update_booking_status(
     booking_id: int,
     body: UpdateStatusRequest,
-    current_user: User = Depends(require_role(["admin", "hostess_1", "hostess_2"])),
+    current_user: User = Depends(require_role(["admin", "hostess"])),
     session: AsyncSession = Depends(get_session),
 ) -> BookingResponse:
     """Обновить статус брони: pending, confirmed, canceled, no_show. При изменении статуса пересчитывается у гостя счётчик подтверждённых броней (confirmed_bookings_count) в разделе Гости; визиты и сегмент не трогаются."""

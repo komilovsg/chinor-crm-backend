@@ -15,7 +15,7 @@ from app.db.session import get_session
 router = APIRouter(prefix="/api", tags=["users"])
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-ALLOWED_ROLES = ("admin", "hostess_1", "hostess_2")
+ALLOWED_ROLES = ("admin", "hostess")
 
 
 class UserResponse(BaseModel):

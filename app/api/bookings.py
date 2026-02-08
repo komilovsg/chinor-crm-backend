@@ -289,6 +289,7 @@ async def update_booking_status(
     old_status = (booking.status or "").strip().lower()
     new_status = (body.status or "").strip().lower()
     booking.status = new_status
+    await session.flush()  # чтобы пересчёт видел новый статус в БД
 
     # Пересчёт у гостя: только confirmed_bookings_count и last_visit_at (по броням confirmed)
     await recalc_guest_metrics_from_bookings(session, booking.guest_id)

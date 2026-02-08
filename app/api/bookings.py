@@ -9,8 +9,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import get_current_user, require_role
-from app.db.models import Booking, Guest, Setting, User, Visit
+from app.db.models import Booking, Guest, Setting, User
 from app.db.session import get_session
+from app.services.guest_metrics import recalc_guest_metrics_from_bookings
 from app.services.webhooks import schedule_webhook
 
 router = APIRouter(prefix="/api", tags=["bookings"])
@@ -248,7 +249,7 @@ async def update_booking_status(
     current_user: User = Depends(require_role(["admin", "hostess_1", "hostess_2"])),
     session: AsyncSession = Depends(get_session),
 ) -> BookingResponse:
-    """Обновить статус брони: pending, confirmed, canceled, no_show. При подтверждении — +1 визит гостю."""
+    """Обновить статус брони: pending, confirmed, canceled, no_show. При любом изменении статуса пересчитываются счётчики гостя (визиты = подтверждённые брони) и сегмент в разделе Гости."""
     if body.status not in ALLOWED_STATUSES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -264,25 +265,9 @@ async def update_booking_status(
     new_status = (body.status or "").strip().lower()
     booking.status = new_status
 
-    # При переводе в confirmed — создаём Visit; триггер БД обновит visits_count и segment
-    if new_status == "confirmed" and old_status != "confirmed":
-        guest = booking.guest
-        if not guest:
-            guest_result = await session.execute(
-                select(Guest).where(Guest.id == booking.guest_id)
-            )
-            guest = guest_result.scalars().one_or_none()
-        if guest and guest.deleted_at is None:
-            now = datetime.now(timezone.utc)
-            session.add(
-                Visit(
-                    guest_id=guest.id,
-                    booking_id=booking.id,
-                    arrived_at=now,
-                    created_at=now,
-                )
-            )
-            # Не инкрементируем вручную — триггер trg_update_guest_metrics_on_visit делает это
+    # При любом изменении статуса брони пересчитываем у гостя визиты и сегмент
+    # по фактическому числу броней со статусом «Подтверждено» (точный расчёт, без дрифта)
+    await recalc_guest_metrics_from_bookings(session, booking.guest_id)
 
     await session.commit()
     await session.refresh(booking, ["guest"])

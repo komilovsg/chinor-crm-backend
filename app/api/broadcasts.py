@@ -1,21 +1,40 @@
-"""Broadcasts API: GET stats, GET history, POST (create campaign + campaign_sends, trigger webhook)."""
+"""Broadcasts API: GET stats, GET history (last 5), GET history/export (admin), POST (create campaign + campaign_sends, trigger webhook)."""
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, File, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Query, Request, UploadFile
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, require_role
 from app.db.models import Campaign, CampaignSend, Guest, Setting, User
 from app.db.session import get_session
 from app.services.webhooks import schedule_webhook
 
 router = APIRouter(prefix="/api", tags=["broadcasts"])
+
+# Человекочитаемые названия сегментов (не показывать "selected" и т.п.)
+SEGMENT_DISPLAY_NAMES = {
+    "all": "Все гости",
+    "selected": "Выбранные гости",
+    "VIP": "VIP",
+    "Постоянные": "Постоянные",
+    "Новички": "Новички",
+}
+
+
+def _campaign_display_name(segment: Optional[str], guest_ids: Optional[List[int]]) -> str:
+    """Название рассылки для отображения пользователю."""
+    if guest_ids:
+        return "Выбранные гости"
+    seg = (segment or "").strip()
+    if seg.lower() == "selected":
+        return "Выбранные гости"
+    return SEGMENT_DISPLAY_NAMES.get(seg, seg or "Все гости")
 
 # Папка для загруженных изображений (должна совпадать с main.py)
 UPLOADS_DIR = Path(__file__).resolve().parent.parent.parent / "uploads"
@@ -56,10 +75,19 @@ class CreateBroadcastRequest(BaseModel):
     guestIds: Optional[List[int]] = None
 
 
+def _normalize_campaign_name_for_display(name: str) -> str:
+    """Чтобы пользователь не видел 'selected' — подменяем на внятные слова."""
+    if not name:
+        return name
+    if "selected" in name.lower():
+        return "Рассылка: Выбранные гости"
+    return name
+
+
 def _campaign_to_response(c: Campaign) -> CampaignResponse:
     return CampaignResponse(
         id=c.id,
-        name=c.name,
+        name=_normalize_campaign_name_for_display(c.name),
         message_text=c.message_text,
         image_url=getattr(c, "image_url", None),
         target_segment=c.target_segment,
@@ -115,10 +143,47 @@ async def get_broadcast_stats(
 
 @router.get("/broadcasts/history", response_model=List[BroadcastHistoryItemResponse])
 async def get_broadcast_history(
+    limit: int = Query(5, ge=1, le=100, description="Количество последних записей"),
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> List[BroadcastHistoryItemResponse]:
-    """Список кампаний с агрегатами sent/failed по campaign_sends."""
+    """Список последних кампаний с агрегатами sent/failed (по умолчанию 5)."""
+    campaigns_result = await session.execute(
+        select(Campaign).order_by(Campaign.id.desc()).limit(limit)
+    )
+    campaigns = campaigns_result.scalars().all()
+    out = []
+    for c in campaigns:
+        sent_result = await session.execute(
+            select(func.count(CampaignSend.id)).where(
+                CampaignSend.campaign_id == c.id,
+                CampaignSend.status == "sent",
+            )
+        )
+        failed_result = await session.execute(
+            select(func.count(CampaignSend.id)).where(
+                CampaignSend.campaign_id == c.id,
+                CampaignSend.status == "failed",
+            )
+        )
+        sent_count = (sent_result.scalar() or 0)
+        failed_count = (failed_result.scalar() or 0)
+        out.append(
+            BroadcastHistoryItemResponse(
+                campaign=_campaign_to_response(c),
+                sent_count=sent_count,
+                failed_count=failed_count,
+            )
+        )
+    return out
+
+
+@router.get("/broadcasts/history/export", response_model=List[BroadcastHistoryItemResponse])
+async def export_broadcast_history(
+    current_user: User = Depends(require_role(["admin"])),
+    session: AsyncSession = Depends(get_session),
+) -> List[BroadcastHistoryItemResponse]:
+    """Полная выгрузка истории рассылок для админа (CSV на фронте)."""
     campaigns_result = await session.execute(
         select(Campaign).order_by(Campaign.id.desc())
     )
@@ -169,8 +234,9 @@ async def create_broadcast(
     """Создать кампанию и записи campaign_sends. После commit — POST webhook в n8n (если URL задан)."""
     now = datetime.now(timezone.utc)
     image_url = (body.imageUrl or "").strip() or None
+    display_name = _campaign_display_name(body.segment, body.guestIds)
     campaign = Campaign(
-        name=f"Рассылка: выбранные гости" if body.guestIds else f"Рассылка: {body.segment}",
+        name=f"Рассылка: {display_name}",
         message_text=body.messageText,
         image_url=image_url,
         target_segment=body.segment or None,

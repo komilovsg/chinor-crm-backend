@@ -332,7 +332,12 @@ async def add_guest_visit(
         created_at=now,
     )
     session.add(visit)
-    guest.visits_count = (guest.visits_count or 0) + 1
+    await session.flush()  # чтобы INSERT визита выполнился
+    # Считаем по таблице visits, чтобы не было +2 при триггере в БД
+    cnt = await session.execute(
+        select(func.count(Visit.id)).where(Visit.guest_id == guest_id)
+    )
+    guest.visits_count = cnt.scalar() or 0
     guest.last_visit_at = now
     guest.updated_at = now
     reg, vip = await _get_segment_thresholds(session)

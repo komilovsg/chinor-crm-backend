@@ -32,6 +32,7 @@ class Guest(Base):
     segment: Mapped[str] = mapped_column(String(50), default="Новичок")
     is_in_stop_list: Mapped[bool] = mapped_column(Boolean, default=False)
     consent_marketing: Mapped[bool] = mapped_column(Boolean, default=False)
+    exclude_from_broadcasts: Mapped[bool] = mapped_column(Boolean, default=False)
     deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
@@ -159,3 +160,17 @@ class Setting(Base):
 
     key: Mapped[str] = mapped_column(String(100), primary_key=True)
     value: Mapped[Optional[str]] = mapped_column(Text)  # JSON string для сложных значений
+
+
+class ActivityLog(Base):
+    """Журнал действий пользователей: создание броней/гостей, смена статусов. Для отчётности админа."""
+
+    __tablename__ = "activity_log"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    action_type: Mapped[str] = mapped_column(String(50), nullable=False)  # booking_created, guest_created, booking_status_changed
+    entity_type: Mapped[str] = mapped_column(String(20), nullable=False)  # booking, guest
+    entity_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    details: Mapped[Optional[str]] = mapped_column(Text)  # JSON: old_status, new_status для смены статуса
+    created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))

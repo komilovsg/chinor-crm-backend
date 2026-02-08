@@ -11,7 +11,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, require_role
-from app.db.models import Guest, Setting, User, Visit
+from app.db.models import ActivityLog, Guest, Setting, User, Visit
 from app.db.session import get_session
 from app.services.segmentation import calc_segment
 
@@ -27,6 +27,7 @@ class GuestResponse(BaseModel):
     visits_count: int
     last_visit_at: Optional[str]
     created_at: str
+    exclude_from_broadcasts: bool = False
 
     class Config:
         from_attributes = True
@@ -49,6 +50,7 @@ class UpdateGuestRequest(BaseModel):
     name: Optional[str] = None
     phone: Optional[str] = None
     email: Optional[str] = None
+    exclude_from_broadcasts: Optional[bool] = None
     # segment не редактируется вручную — рассчитывается автоматически по visits_count
 
 
@@ -62,6 +64,7 @@ def _guest_to_response(guest: Guest) -> GuestResponse:
         visits_count=guest.visits_count or 0,
         last_visit_at=guest.last_visit_at.isoformat() if guest.last_visit_at else None,
         created_at=guest.created_at.isoformat() if guest.created_at else "",
+        exclude_from_broadcasts=getattr(guest, "exclude_from_broadcasts", False),
     )
 
 
@@ -216,15 +219,26 @@ async def create_guest(
             status_code=status.HTTP_409_CONFLICT,
             detail="Guest with this phone already exists",
         )
+    now = datetime.now(timezone.utc)
     guest = Guest(
         phone=phone,
         name=(body.name.strip() or None) if body.name else None,
         email=(body.email.strip() or None) if body.email else None,
         segment="Новичок",
         visits_count=0,
-        created_at=datetime.now(timezone.utc),
+        created_at=now,
     )
     session.add(guest)
+    await session.flush()
+    session.add(
+        ActivityLog(
+            user_id=current_user.id,
+            action_type="guest_created",
+            entity_type="guest",
+            entity_id=guest.id,
+            created_at=now,
+        )
+    )
     await session.commit()
     await session.refresh(guest)
     return _guest_to_response(guest)
@@ -260,6 +274,8 @@ async def update_guest(
         guest.name = body.name.strip() if body.name else None
     if body.email is not None:
         guest.email = body.email.strip() if body.email else None
+    if body.exclude_from_broadcasts is not None:
+        guest.exclude_from_broadcasts = body.exclude_from_broadcasts
     # segment пересчитывается автоматически при изменении visits_count
     await session.commit()
     await session.refresh(guest)

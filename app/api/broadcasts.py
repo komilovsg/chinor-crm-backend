@@ -72,7 +72,6 @@ class CreateBroadcastRequest(BaseModel):
     segment: str
     messageText: str
     imageUrl: Optional[str] = None
-    guestIds: Optional[List[int]] = None
 
 
 def _normalize_campaign_name_for_display(name: str) -> str:
@@ -234,7 +233,7 @@ async def create_broadcast(
     """Создать кампанию и записи campaign_sends. После commit — POST webhook в n8n (если URL задан)."""
     now = datetime.now(timezone.utc)
     image_url = (body.imageUrl or "").strip() or None
-    display_name = _campaign_display_name(body.segment, body.guestIds)
+    display_name = _campaign_display_name(body.segment, None)
     campaign = Campaign(
         name=f"Рассылка: {display_name}",
         message_text=body.messageText,
@@ -247,21 +246,15 @@ async def create_broadcast(
     session.add(campaign)
     await session.flush()
 
-    if body.guestIds:
-        guests_stmt = select(Guest).where(
-            Guest.id.in_(body.guestIds),
-            Guest.deleted_at.is_(None),
-            Guest.is_in_stop_list.is_(False),
-            Guest.phone != "",
-        )
-    else:
-        guests_stmt = select(Guest).where(
-            Guest.deleted_at.is_(None),
-            Guest.is_in_stop_list.is_(False),
-            Guest.phone != "",
-        )
-        if body.segment and body.segment.strip() and body.segment.strip().lower() != "all":
-            guests_stmt = guests_stmt.where(Guest.segment == body.segment.strip())
+    # Рассылка только по сегменту; гости с галочкой «исключить из рассылок» не попадают
+    guests_stmt = select(Guest).where(
+        Guest.deleted_at.is_(None),
+        Guest.is_in_stop_list.is_(False),
+        Guest.phone != "",
+        Guest.exclude_from_broadcasts.is_(False),
+    )
+    if body.segment and body.segment.strip() and body.segment.strip().lower() != "all":
+        guests_stmt = guests_stmt.where(Guest.segment == body.segment.strip())
     guests_result = await session.execute(guests_stmt)
     guests = guests_result.scalars().all()
 

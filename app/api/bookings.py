@@ -1,4 +1,5 @@
 """Bookings API: GET list (search, date, page, limit), GET :id, POST, PATCH :id/status."""
+import json
 from datetime import datetime, timezone
 from typing import List, Optional
 
@@ -9,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import get_current_user, require_role
-from app.db.models import Booking, Guest, Setting, User
+from app.db.models import ActivityLog, Booking, Guest, Setting, User
 from app.db.session import get_session
 from app.services.guest_metrics import recalc_guest_metrics_from_bookings
 from app.services.webhooks import schedule_webhook
@@ -162,6 +163,7 @@ async def create_booking(
 ) -> BookingResponse:
     """Создать бронь: guestId (существующий) или guest (найти/создать по телефону), date, time, persons."""
     guest: Optional[Guest] = None
+    created_new_guest = False
     if body.guestId:
         guest_result = await session.execute(select(Guest).where(Guest.id == body.guestId))
         guest = guest_result.scalars().one_or_none()
@@ -182,6 +184,7 @@ async def create_booking(
             )
             session.add(guest)
             await session.flush()
+            created_new_guest = True
     if not guest:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -204,14 +207,35 @@ async def create_booking(
     if body.persons < 1:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="persons must be >= 1")
 
+    now = datetime.now(timezone.utc)
     booking = Booking(
         guest_id=guest.id,
         booking_time=booking_time,
         party_size=body.persons,
         status="pending",
-        created_at=datetime.now(timezone.utc),
+        created_at=now,
     )
     session.add(booking)
+    await session.flush()
+    if created_new_guest:
+        session.add(
+            ActivityLog(
+                user_id=current_user.id,
+                action_type="guest_created",
+                entity_type="guest",
+                entity_id=guest.id,
+                created_at=now,
+            )
+        )
+    session.add(
+        ActivityLog(
+            user_id=current_user.id,
+            action_type="booking_created",
+            entity_type="booking",
+            entity_id=booking.id,
+            created_at=now,
+        )
+    )
     await session.commit()
     await session.refresh(booking, ["guest"])
 
@@ -269,6 +293,17 @@ async def update_booking_status(
     # по фактическому числу броней со статусом «Подтверждено» (точный расчёт, без дрифта)
     await recalc_guest_metrics_from_bookings(session, booking.guest_id)
 
+    now = datetime.now(timezone.utc)
+    session.add(
+        ActivityLog(
+            user_id=current_user.id,
+            action_type="booking_status_changed",
+            entity_type="booking",
+            entity_id=booking_id,
+            details=json.dumps({"old_status": old_status, "new_status": new_status}),
+            created_at=now,
+        )
+    )
     await session.commit()
     await session.refresh(booking, ["guest"])
     return _booking_to_response(booking)

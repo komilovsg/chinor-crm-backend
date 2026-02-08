@@ -25,6 +25,7 @@ class GuestResponse(BaseModel):
     email: Optional[str]
     segment: str
     visits_count: int
+    confirmed_bookings_count: int = 0
     last_visit_at: Optional[str]
     created_at: str
     exclude_from_broadcasts: bool = False
@@ -62,6 +63,7 @@ def _guest_to_response(guest: Guest) -> GuestResponse:
         email=guest.email,
         segment=guest.segment or "Новичок",
         visits_count=guest.visits_count or 0,
+        confirmed_bookings_count=getattr(guest, "confirmed_bookings_count", 0),
         last_visit_at=guest.last_visit_at.isoformat() if guest.last_visit_at else None,
         created_at=guest.created_at.isoformat() if guest.created_at else "",
         exclude_from_broadcasts=getattr(guest, "exclude_from_broadcasts", False),
@@ -314,7 +316,7 @@ async def add_guest_visit(
     current_user: User = Depends(require_role(["admin", "hostess_1", "hostess_2"])),
     session: AsyncSession = Depends(get_session),
 ) -> GuestResponse:
-    """Добавить визит гостю: создать запись Visit, увеличить visits_count, пересчитать сегмент. Доступ: admin, hostess_1, hostess_2."""
+    """Добавить визит гостю: увеличить visits_count и пересчитать сегмент по правилам из Настроек (confirmed_bookings_count не меняется). Доступ: admin, hostess_1, hostess_2."""
     result = await session.execute(select(Guest).where(Guest.id == guest_id))
     guest = result.scalars().one_or_none()
     if not guest or guest.deleted_at is not None:
@@ -333,7 +335,6 @@ async def add_guest_visit(
     guest.visits_count = (guest.visits_count or 0) + 1
     guest.last_visit_at = now
     guest.updated_at = now
-
     reg, vip = await _get_segment_thresholds(session)
     guest.segment = calc_segment(guest.visits_count, reg, vip)
 

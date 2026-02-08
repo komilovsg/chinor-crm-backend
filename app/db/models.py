@@ -28,6 +28,7 @@ class Guest(Base):
     last_visit_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     last_interaction_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     visits_count: Mapped[int] = mapped_column(Integer, default=0)
+    confirmed_bookings_count: Mapped[int] = mapped_column(Integer, default=0)
     total_revenue: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0"))
     segment: Mapped[str] = mapped_column(String(50), default="Новичок")
     is_in_stop_list: Mapped[bool] = mapped_column(Boolean, default=False)

@@ -1,55 +1,26 @@
-"""Пересчёт метрик гостя (visits_count, segment) по подтверждённым бронированиям.
+"""Пересчёт метрик гостя по подтверждённым бронированиям.
 
-Источник истины: количество броней со статусом confirmed.
-При смене статуса брони на «Подтверждено» или с «Подтверждено» на другой
-нужно вызывать recalc_guest_metrics_from_bookings — тогда счётчики в таблице
-гостей всегда совпадают с фактическим числом подтверждённых броней.
+Обновляет только confirmed_bookings_count и last_visit_at от последней подтверждённой брони.
+visits_count и segment не трогаются: визиты и сегмент считаются по кнопке «Добавить визит»
+и по правилам сегментации в Настройках (пересчитать сегменты всех гостей).
 """
 from datetime import datetime, timezone
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Booking, Guest, Setting
-from app.services.segmentation import calc_segment
-
-
-async def _get_segment_thresholds(session: AsyncSession) -> tuple[int, int]:
-    """Пороги сегментации из settings."""
-    result = await session.execute(
-        select(Setting).where(
-            Setting.key.in_(("segment_regular_threshold", "segment_vip_threshold"))
-        )
-    )
-    by_key = {r.key: r.value for r in result.scalars().all()}
-    reg = 5
-    vip = 10
-    if by_key.get("segment_regular_threshold"):
-        try:
-            reg = max(0, int((by_key["segment_regular_threshold"] or "").strip()))
-        except (ValueError, AttributeError):
-            pass
-    if by_key.get("segment_vip_threshold"):
-        try:
-            vip = max(0, int((by_key["segment_vip_threshold"] or "").strip()))
-        except (ValueError, AttributeError):
-            pass
-    if vip <= reg:
-        vip = reg + 1
-    return reg, vip
+from app.db.models import Booking, Guest
 
 
 async def recalc_guest_metrics_from_bookings(
     session: AsyncSession,
     guest_id: int,
 ) -> None:
-    """Пересчитать у гостя visits_count и segment по числу подтверждённых броней.
+    """Пересчитать у гостя только confirmed_bookings_count и last_visit_at по броням со статусом «confirmed».
 
-    Вызывать после любого изменения статуса брони этого гостя (в т.ч. confirm /
-    cancel / no_show). Так «Визиты» и «Подтверждённые брони» в разделе Гости
-    всегда равны количеству броней со статусом «Подтверждено».
+    visits_count и segment не меняются: визиты и сегмент задаются кнопкой «Добавить визит»
+    и правилами сегментации в Настройках.
     """
-    # Количество подтверждённых броней гостя
     count_stmt = select(func.count(Booking.id)).where(
         Booking.guest_id == guest_id,
         Booking.status == "confirmed",
@@ -57,7 +28,6 @@ async def recalc_guest_metrics_from_bookings(
     count_result = await session.execute(count_stmt)
     confirmed_count = count_result.scalar() or 0
 
-    # Последняя дата подтверждённой брони (для last_visit_at)
     max_time_stmt = select(func.max(Booking.booking_time)).where(
         Booking.guest_id == guest_id,
         Booking.status == "confirmed",
@@ -71,7 +41,7 @@ async def recalc_guest_metrics_from_bookings(
         return
 
     now = datetime.now(timezone.utc)
-    guest.visits_count = confirmed_count
+    guest.confirmed_bookings_count = confirmed_count
     guest.updated_at = now
     if last_booking_time is not None:
         guest.last_visit_at = (
@@ -79,8 +49,5 @@ async def recalc_guest_metrics_from_bookings(
             if last_booking_time.tzinfo is None
             else last_booking_time
         )
-    else:
-        guest.last_visit_at = None
-
-    reg, vip = await _get_segment_thresholds(session)
-    guest.segment = calc_segment(confirmed_count, reg, vip)
+    # при отсутствии подтверждённых броней last_visit_at не трогаем (может быть от «Добавить визит»)
+    # Сегмент не меняем — он считается только по visits_count и порогам из Настроек

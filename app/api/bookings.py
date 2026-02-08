@@ -180,6 +180,7 @@ async def create_booking(
                 email=(body.guest.email or "").strip() or None,
                 segment="Новичок",
                 visits_count=0,
+                confirmed_bookings_count=0,
                 created_at=datetime.now(timezone.utc),
             )
             session.add(guest)
@@ -273,7 +274,7 @@ async def update_booking_status(
     current_user: User = Depends(require_role(["admin", "hostess_1", "hostess_2"])),
     session: AsyncSession = Depends(get_session),
 ) -> BookingResponse:
-    """Обновить статус брони: pending, confirmed, canceled, no_show. При любом изменении статуса пересчитываются счётчики гостя (визиты = подтверждённые брони) и сегмент в разделе Гости."""
+    """Обновить статус брони: pending, confirmed, canceled, no_show. При изменении статуса пересчитывается у гостя счётчик подтверждённых броней (confirmed_bookings_count) в разделе Гости; визиты и сегмент не трогаются."""
     if body.status not in ALLOWED_STATUSES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -289,8 +290,7 @@ async def update_booking_status(
     new_status = (body.status or "").strip().lower()
     booking.status = new_status
 
-    # При любом изменении статуса брони пересчитываем у гостя визиты и сегмент
-    # по фактическому числу броней со статусом «Подтверждено» (точный расчёт, без дрифта)
+    # Пересчёт у гостя: только confirmed_bookings_count и last_visit_at (по броням confirmed)
     await recalc_guest_metrics_from_bookings(session, booking.guest_id)
 
     now = datetime.now(timezone.utc)

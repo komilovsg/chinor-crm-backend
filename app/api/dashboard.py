@@ -1,4 +1,4 @@
-"""GET /api/dashboard/stats, recent-activity, user-stats, visits-by-date, activity export (admin)."""
+"""GET /api/dashboard/stats, segments, booking-dynamics, recent-activity, user-stats, activity export (admin)."""
 import csv
 import io
 import json
@@ -12,7 +12,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, require_role
-from app.db.models import ActivityLog, Booking, Guest, User, Visit
+from app.db.models import ActivityLog, Booking, Guest, User
 from app.db.session import get_session
 
 router = APIRouter(prefix="/api", tags=["dashboard"])
@@ -47,7 +47,12 @@ class UserActivityStats(BaseModel):
     status_changes: int
 
 
-class VisitsByDateItem(BaseModel):
+class SegmentCount(BaseModel):
+    segment: str
+    count: int
+
+
+class BookingDynamicsItem(BaseModel):
     date: str  # YYYY-MM-DD
     count: int
 
@@ -97,6 +102,77 @@ async def get_dashboard_stats(
         guestCount=guest_count,
         noShowRate=no_show_rate,
     )
+
+
+@router.get("/dashboard/segments", response_model=List[SegmentCount])
+async def get_dashboard_segments(
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> List[SegmentCount]:
+    """Распределение гостей по сегментам (VIP, Постоянный, Новичок/Новички) для карточки «Сегменты гостей»."""
+    base = select(Guest).where(Guest.deleted_at.is_(None))
+    total_result = await session.execute(select(func.count()).select_from(base.subquery()))
+    total = (total_result.scalar() or 0)
+    if total == 0:
+        return [
+            SegmentCount(segment="VIP", count=0),
+            SegmentCount(segment="Постоянные", count=0),
+            SegmentCount(segment="Новички", count=0),
+        ]
+    vip_result = await session.execute(
+        select(func.count(Guest.id)).where(
+            Guest.deleted_at.is_(None),
+            Guest.segment == "VIP",
+        )
+    )
+    regular_result = await session.execute(
+        select(func.count(Guest.id)).where(
+            Guest.deleted_at.is_(None),
+            Guest.segment == "Постоянный",
+        )
+    )
+    new_result = await session.execute(
+        select(func.count(Guest.id)).where(
+            Guest.deleted_at.is_(None),
+            Guest.segment.in_(["Новичок", "Новички"]),
+        )
+    )
+    return [
+        SegmentCount(segment="VIP", count=(vip_result.scalar() or 0)),
+        SegmentCount(segment="Постоянные", count=(regular_result.scalar() or 0)),
+        SegmentCount(segment="Новички", count=(new_result.scalar() or 0)),
+    ]
+
+
+@router.get("/dashboard/booking-dynamics", response_model=List[BookingDynamicsItem])
+async def get_booking_dynamics(
+    days: int = Query(14, ge=7, le=90, description="Количество дней"),
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> List[BookingDynamicsItem]:
+    """Количество бронирований по дням за последние N дней для карточки «Динамика бронирований»."""
+    tz = timezone.utc
+    end_date = date.today()
+    start_date = end_date - timedelta(days=days)
+    start_dt = datetime.combine(start_date, datetime.min.time()).replace(tzinfo=tz)
+    end_dt = datetime.combine(end_date, datetime.max.time()).replace(tzinfo=tz)
+    stmt = (
+        select(func.date(Booking.booking_time).label("day"), func.count(Booking.id).label("cnt"))
+        .where(Booking.booking_time >= start_dt, Booking.booking_time <= end_dt)
+        .group_by(func.date(Booking.booking_time))
+        .order_by(func.date(Booking.booking_time))
+    )
+    result = await session.execute(stmt)
+    rows = result.all()
+    by_date = {str(r.day): r.cnt for r in rows}
+    out = []
+    for i in range(days + 1):
+        d = start_date + timedelta(days=i)
+        if d > end_date:
+            break
+        date_str = d.isoformat()
+        out.append(BookingDynamicsItem(date=date_str, count=by_date.get(date_str, 0)))
+    return out
 
 
 def _action_label(action_type: str, details: Optional[str]) -> str:
@@ -194,44 +270,6 @@ async def get_user_activity_stats(
             )
         )
     return out
-
-
-@router.get("/dashboard/visits-by-date", response_model=List[VisitsByDateItem])
-async def get_visits_by_date(
-    from_date: Optional[str] = Query(None, description="YYYY-MM-DD"),
-    to_date: Optional[str] = Query(None, description="YYYY-MM-DD"),
-    current_user: User = Depends(require_role(["admin"])),
-    session: AsyncSession = Depends(get_session),
-) -> List[VisitsByDateItem]:
-    """Количество визитов по дням для календаря (только админ). По умолчанию — последние 3 месяца."""
-    tz = timezone.utc
-    if to_date:
-        try:
-            end = datetime.strptime(to_date[:10], "%Y-%m-%d").date()
-        except ValueError:
-            end = date.today()
-    else:
-        end = date.today()
-    if from_date:
-        try:
-            start = datetime.strptime(from_date[:10], "%Y-%m-%d").date()
-        except ValueError:
-            start = end - timedelta(days=90)
-    else:
-        start = end - timedelta(days=90)
-    start_dt = datetime.combine(start, datetime.min.time()).replace(tzinfo=tz)
-    end_dt = datetime.combine(end, datetime.max.time()).replace(tzinfo=tz)
-
-    # Visit.arrived_at — дата визита; считаем количество визитов по дням
-    stmt = (
-        select(func.date(Visit.arrived_at).label("day"), func.count(Visit.id).label("cnt"))
-        .where(Visit.arrived_at >= start_dt, Visit.arrived_at <= end_dt)
-        .group_by(func.date(Visit.arrived_at))
-        .order_by(func.date(Visit.arrived_at))
-    )
-    result = await session.execute(stmt)
-    rows = result.all()
-    return [VisitsByDateItem(date=str(r.day), count=r.cnt) for r in rows]
 
 
 @router.get("/dashboard/activity-export")

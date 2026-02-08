@@ -28,5 +28,9 @@ scripts/remove-venv-from-history.sh
 *.md
 !README.md
 
+# Загруженные изображения (не коммитить)
+uploads/*
+!uploads/.gitkeep
+
 # Alembic (оставляем версии, игнорируем только локальные артефакты при необходимости)
 # alembic/versions/*.py — не игнорируем, миграции в репо

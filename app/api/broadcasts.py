@@ -1,8 +1,11 @@
 """Broadcasts API: GET stats, GET history, POST (create campaign + campaign_sends, trigger webhook)."""
+import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, File, Request, UploadFile
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,6 +16,11 @@ from app.db.session import get_session
 from app.services.webhooks import schedule_webhook
 
 router = APIRouter(prefix="/api", tags=["broadcasts"])
+
+# Папка для загруженных изображений (должна совпадать с main.py)
+UPLOADS_DIR = Path(__file__).resolve().parent.parent.parent / "uploads"
+ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png"}
+MAX_FILE_SIZE = 5 * 1024 * 1024  # 5 MB
 
 
 class BroadcastStatsResponse(BaseModel):
@@ -45,6 +53,7 @@ class CreateBroadcastRequest(BaseModel):
     segment: str
     messageText: str
     imageUrl: Optional[str] = None
+    guestIds: Optional[List[int]] = None
 
 
 def _campaign_to_response(c: Campaign) -> CampaignResponse:
@@ -58,6 +67,34 @@ def _campaign_to_response(c: Campaign) -> CampaignResponse:
         created_at=c.created_at.isoformat() if c.created_at else "",
         updated_at=c.updated_at.isoformat() if c.updated_at else "",
     )
+
+
+@router.post("/broadcasts/upload-image")
+async def upload_broadcast_image(
+    request: Request,
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+):
+    """Загрузить изображение для рассылки. JPEG/PNG, до 5 MB. Возвращает публичный URL."""
+    UPLOADS_DIR.mkdir(exist_ok=True)
+    ext = Path(file.filename or "").suffix.lower()
+    if ext not in ALLOWED_EXTENSIONS:
+        return JSONResponse(
+            status_code=400,
+            content={"detail": "Только JPEG и PNG"},
+        )
+    content = await file.read()
+    if len(content) > MAX_FILE_SIZE:
+        return JSONResponse(
+            status_code=400,
+            content={"detail": "Файл не более 5 MB"},
+        )
+    filename = f"{uuid.uuid4().hex}{ext}"
+    path = UPLOADS_DIR / filename
+    path.write_bytes(content)
+    base = str(request.base_url).rstrip("/")
+    url = f"{base}/uploads/{filename}"
+    return {"url": url}
 
 
 @router.get("/broadcasts/stats", response_model=BroadcastStatsResponse)
@@ -133,7 +170,7 @@ async def create_broadcast(
     now = datetime.now(timezone.utc)
     image_url = (body.imageUrl or "").strip() or None
     campaign = Campaign(
-        name=f"Рассылка: {body.segment}",
+        name=f"Рассылка: выбранные гости" if body.guestIds else f"Рассылка: {body.segment}",
         message_text=body.messageText,
         image_url=image_url,
         target_segment=body.segment or None,
@@ -144,13 +181,21 @@ async def create_broadcast(
     session.add(campaign)
     await session.flush()
 
-    guests_stmt = select(Guest).where(
-        Guest.deleted_at.is_(None),
-        Guest.is_in_stop_list.is_(False),
-        Guest.phone != "",
-    )
-    if body.segment and body.segment.strip():
-        guests_stmt = guests_stmt.where(Guest.segment == body.segment.strip())
+    if body.guestIds:
+        guests_stmt = select(Guest).where(
+            Guest.id.in_(body.guestIds),
+            Guest.deleted_at.is_(None),
+            Guest.is_in_stop_list.is_(False),
+            Guest.phone != "",
+        )
+    else:
+        guests_stmt = select(Guest).where(
+            Guest.deleted_at.is_(None),
+            Guest.is_in_stop_list.is_(False),
+            Guest.phone != "",
+        )
+        if body.segment and body.segment.strip() and body.segment.strip().lower() != "all":
+            guests_stmt = guests_stmt.where(Guest.segment == body.segment.strip())
     guests_result = await session.execute(guests_stmt)
     guests = guests_result.scalars().all()
 

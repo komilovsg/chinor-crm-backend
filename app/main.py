@@ -1,7 +1,9 @@
 """Точка входа FastAPI. CORS для фронта, префикс /api — в роутерах (B4+)."""
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from passlib.context import CryptContext
 from sqlalchemy import func, select, text
@@ -71,6 +73,11 @@ async def root():
 
 
 from app.api import auth, dashboard, bookings, guests, broadcasts, settings, users
+
+# Статика для загруженных изображений (рассылки)
+_uploads_dir = Path(__file__).resolve().parent.parent / "uploads"
+_uploads_dir.mkdir(exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=str(_uploads_dir)), name="uploads")
 
 app.include_router(auth.router)
 app.include_router(dashboard.router)
